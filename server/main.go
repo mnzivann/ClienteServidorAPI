@@ -4,21 +4,51 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 )
 
+// Estructura de los datos
 type Message struct {
-	Text string `json:"text"`
+	Sender string `json:"sender"`
+	Text   string `json:"text"`
 }
 
-// Aquí guardaremos los mensajes en memoria
-var messages []Message
-var mutex sync.Mutex // Para evitar errores si llegan muchos mensajes a la vez
+type DatabaseSchema struct {
+	Users    []string  `json:"users"`
+	Messages []Message `json:"messages"`
+}
+
+var db DatabaseSchema = DatabaseSchema{Users: []string{}, Messages: []Message{}}
+var mutex sync.Mutex
+const dbFilename = "database.json"
+
+// Cargar datos del archivo persistente al iniciar
+func initDatabase() {
+	file, err := os.ReadFile(dbFilename)
+	if err == nil {
+		json.Unmarshal(file, &db)
+	}
+}
+
+// Guardar datos en el archivo persistente
+func saveDatabase() {
+	data, _ := json.MarshalIndent(db, "", "  ")
+	os.WriteFile(dbFilename, data, 0644)
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
 
 func handleMessages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
 	if r.Method == http.MethodOptions {
 		return
 	}
@@ -26,34 +56,52 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	// Si es GET, devolvemos la lista de mensajes (Para la App Servidor de Python)
+	// GET: Retornar todos los mensajes
 	if r.Method == http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(messages)
+		json.NewEncoder(w).Encode(db.Messages)
 		return
 	}
 
-	// Si es POST, guardamos el nuevo mensaje (Desde la App Cliente de Python)
+	// POST: Guardar mensaje y registrar usuario en la Base de Datos
 	if r.Method == http.MethodPost {
 		var msg Message
-		err := json.NewDecoder(r.Body).Decode(&msg)
-		if err != nil {
-			http.Error(w, "Error al leer el mensaje", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		messages = append(messages, msg)
+
+		db.Messages = append(db.Messages, msg)
+
+		// Si el usuario no existe en la base de datos, lo registramos
+		if !contains(db.Users, msg.Sender) && msg.Sender != "" {
+			db.Users = append(db.Users, msg.Sender)
+		}
+
+		saveDatabase()
+
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"status": "Mensaje guardado"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "Datos guardados en DB"})
 		return
 	}
+}
 
-	http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+func handleUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		mutex.Lock()
+		json.NewEncoder(w).Encode(db.Users)
+		mutex.Unlock()
+		return
+	}
 }
 
 func main() {
-	// Nuevo nombre de ruta
+	initDatabase()
 	http.HandleFunc("/api/clienteservidor/messages", handleMessages)
+	http.HandleFunc("/api/clienteservidor/users", handleUsers)
 	
-	log.Println("API ClienteServidor en Go escuchando en el puerto 8080...")
+	log.Println("Servidor ClienteServidor con Base de Datos corriendo en puerto 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
