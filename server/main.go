@@ -2,14 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"sync"
+	"time"
 )
 
-// Estructura de los datos
 type Message struct {
+	ID     string `json:"id"`
 	Sender string `json:"sender"`
 	Text   string `json:"text"`
 }
@@ -23,7 +25,6 @@ var db DatabaseSchema = DatabaseSchema{Users: []string{}, Messages: []Message{}}
 var mutex sync.Mutex
 const dbFilename = "database.json"
 
-// Cargar datos del archivo persistente al iniciar
 func initDatabase() {
 	file, err := os.ReadFile(dbFilename)
 	if err == nil {
@@ -31,7 +32,6 @@ func initDatabase() {
 	}
 }
 
-// Guardar datos en el archivo persistente
 func saveDatabase() {
 	data, _ := json.MarshalIndent(db, "", "  ")
 	os.WriteFile(dbFilename, data, 0644)
@@ -48,52 +48,93 @@ func contains(slice []string, item string) bool {
 
 func handleMessages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-	if r.Method == http.MethodOptions {
-		return
-	}
+
+	if r.Method == http.MethodOptions { return }
 
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	// GET: Retornar todos los mensajes
-	if r.Method == http.MethodGet {
+	switch r.Method {
+	case http.MethodGet: // LEER
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(db.Messages)
-		return
-	}
 
-	// POST: Guardar mensaje y registrar usuario en la Base de Datos
-	if r.Method == http.MethodPost {
+	case http.MethodPost: // CREAR
 		var msg Message
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
+		json.NewDecoder(r.Body).Decode(&msg)
+		// Generar ID único basado en milisegundos
+		msg.ID = fmt.Sprintf("%d", time.Now().UnixMilli())
+		
 		db.Messages = append(db.Messages, msg)
-
-		// Si el usuario no existe en la base de datos, lo registramos
 		if !contains(db.Users, msg.Sender) && msg.Sender != "" {
 			db.Users = append(db.Users, msg.Sender)
 		}
-
 		saveDatabase()
-
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"status": "Datos guardados en DB"})
-		return
+		json.NewEncoder(w).Encode(msg)
+
+	case http.MethodPut: // ACTUALIZAR
+		var msg Message
+		json.NewDecoder(r.Body).Decode(&msg)
+		for i, m := range db.Messages {
+			if m.ID == msg.ID {
+				db.Messages[i].Text = msg.Text
+				break
+			}
+		}
+		saveDatabase()
+		json.NewEncoder(w).Encode(map[string]string{"status": "Mensaje actualizado"})
+
+	case http.MethodDelete: // ELIMINAR MENSAJE
+		id := r.URL.Query().Get("id")
+		for i, m := range db.Messages {
+			if m.ID == id {
+				// Borrar elemento del slice
+				db.Messages = append(db.Messages[:i], db.Messages[i+1:]...)
+				break
+			}
+		}
+		saveDatabase()
+		json.NewEncoder(w).Encode(map[string]string{"status": "Mensaje eliminado"})
 	}
 }
 
 func handleUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	if r.Method == http.MethodGet {
+	w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
+	
+	if r.Method == http.MethodOptions { return }
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	if r.Method == http.MethodGet { // LEER USUARIOS
 		w.Header().Set("Content-Type", "application/json")
-		mutex.Lock()
 		json.NewEncoder(w).Encode(db.Users)
-		mutex.Unlock()
-		return
+		
+	} else if r.Method == http.MethodDelete { // ELIMINAR USUARIO (Y SUS MENSAJES)
+		name := r.URL.Query().Get("name")
+		
+		// Borrar usuario de la lista
+		for i, u := range db.Users {
+			if u == name {
+				db.Users = append(db.Users[:i], db.Users[i+1:]...)
+				break
+			}
+		}
+		
+		// Borrar en cascada todos los mensajes que le pertenecen
+		var remainingMessages []Message
+		for _, m := range db.Messages {
+			if m.Sender != name {
+				remainingMessages = append(remainingMessages, m)
+			}
+		}
+		db.Messages = remainingMessages
+		saveDatabase()
+		json.NewEncoder(w).Encode(map[string]string{"status": "Usuario eliminado"})
 	}
 }
 
@@ -102,6 +143,6 @@ func main() {
 	http.HandleFunc("/api/clienteservidor/messages", handleMessages)
 	http.HandleFunc("/api/clienteservidor/users", handleUsers)
 	
-	log.Println("Servidor ClienteServidor con Base de Datos corriendo en puerto 8080...")
+	log.Println("Servidor Go CRUD corriendo en puerto 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
