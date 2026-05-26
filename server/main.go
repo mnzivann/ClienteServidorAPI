@@ -4,33 +4,56 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
 )
 
-// Estructura de los datos
-type Task struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
+type Message struct {
+	Text string `json:"text"`
 }
 
-// Datos simulados
-var tasks = []Task{
-	{ID: "1", Title: "Revisar cableado del nodo ESP32", Status: "Pendiente"},
-	{ID: "2", Title: "Actualizar roles en Ubuntu Server", Status: "Completado"},
-	{ID: "3", Title: "Calibrar sensor ultrasónico", Status: "Pendiente"},
-}
+// Aquí guardaremos los mensajes en memoria
+var messages []Message
+var mutex sync.Mutex // Para evitar errores si llegan muchos mensajes a la vez
 
-// Controlador del endpoint
-func getTasks(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	// Permitir conexiones desde cualquier cliente (CORS básico)
-	w.Header().Set("Access-Control-Allow-Origin", "*") 
-	json.NewEncoder(w).Encode(tasks)
+func handleMessages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	// Si es GET, devolvemos la lista de mensajes (Para la App Servidor de Python)
+	if r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(messages)
+		return
+	}
+
+	// Si es POST, guardamos el nuevo mensaje (Desde la App Cliente de Python)
+	if r.Method == http.MethodPost {
+		var msg Message
+		err := json.NewDecoder(r.Body).Decode(&msg)
+		if err != nil {
+			http.Error(w, "Error al leer el mensaje", http.StatusBadRequest)
+			return
+		}
+		messages = append(messages, msg)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"status": "Mensaje guardado"})
+		return
+	}
+
+	http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 }
 
 func main() {
-	http.HandleFunc("/api/techdash/tasks", getTasks)
+	// Nuevo nombre de ruta
+	http.HandleFunc("/api/clienteservidor/messages", handleMessages)
 	
-	log.Println("Servidor Go corriendo en el puerto 8080...")
+	log.Println("API ClienteServidor en Go escuchando en el puerto 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

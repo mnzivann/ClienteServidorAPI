@@ -2,40 +2,32 @@ import tkinter as tk
 from tkinter import messagebox
 import requests
 
-API_URL = "http://localhost:8080/api/techdash/tasks"
+# URL actualizada con el nuevo nombre
+API_URL = "http://localhost:8080/api/clienteservidor/messages"
 
-def fetch_tasks():
+def send_message():
+    text = entry_message.get()
+    if not text:
+        return
+
     try:
-        # Consumir la API REST
-        response = requests.get(API_URL)
+        payload = {"text": text}
+        response = requests.post(API_URL, json=payload)
         response.raise_for_status()
-        tasks = response.json()
         
-        # Limpiar la lista actual
-        listbox.delete(0, tk.END)
-        
-        # Poblar la interfaz con los datos
-        for task in tasks:
-            status_icon = "✓" if task['status'] == "Completado" else "✗"
-            listbox.insert(tk.END, f"[{status_icon}] {task['title']}")
-            
+        entry_message.delete(0, tk.END)
     except requests.exceptions.RequestException as e:
-        messagebox.showerror("Error de Conexión", f"No se pudo conectar al servidor Go:\n{e}")
+        messagebox.showerror("Error", f"Fallo de conexión:\n{e}")
 
-# Configuración de la Ventana Principal
 root = tk.Tk()
-root.title("TechDash - Interfaz de Técnico")
-root.geometry("450x300")
+root.title("ClienteServidor - Transmisor")
+root.geometry("400x150")
 root.configure(padx=20, pady=20)
 
-# Elementos de la UI
-header = tk.Label(root, text="Panel de Tareas", font=("Arial", 16, "bold"))
-header.pack(pady=(0, 10))
+tk.Label(root, text="Escribe un mensaje para el servidor:", font=("Arial", 12)).pack()
+entry_message = tk.Entry(root, font=("Arial", 14), width=30)
+entry_message.pack(pady=10)
 
-btn = tk.Button(root, text="Sincronizar Tareas", command=fetch_tasks, bg="#0078D7", fg="white")
-btn.pack(fill=tk.X, pady=5)
-
-listbox = tk.Listbox(root, font=("Consolas", 11), height=10)
-listbox.pack(fill=tk.BOTH, expand=True, pady=10)
+tk.Button(root, text="Enviar Mensaje", command=send_message, bg="#0078D7", fg="white").pack()
 
 root.mainloop()
