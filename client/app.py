@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
 
-API_MESSAGES = "http://localhost:8080/api/clienteservidor/messages"
+API_MESSAGES = "http://localhost:8081/api/clienteservidor/messages"
 
 def send_message():
     usuario = entry_user.get().strip()

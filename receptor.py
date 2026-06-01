@@ -2,8 +2,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
 
-API_MESSAGES = "http://localhost:8080/api/clienteservidor/messages"
-API_USERS = "http://localhost:8080/api/clienteservidor/users"
+API_MESSAGES = "http://localhost:8081/api/clienteservidor/messages"
+API_USERS = "http://localhost:8081/api/clienteservidor/users"
 
 class ReceptorApp:
     def __init__(self, root):

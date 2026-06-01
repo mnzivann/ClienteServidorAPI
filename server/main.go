@@ -1,14 +1,17 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"sync"
 	"time"
+
+	_ "modernc.org/sqlite" // Driver de SQLite
 )
+
+var db *sql.DB
 
 type Message struct {
 	ID     string `json:"id"`
@@ -16,34 +19,32 @@ type Message struct {
 	Text   string `json:"text"`
 }
 
-type DatabaseSchema struct {
-	Users    []string  `json:"users"`
-	Messages []Message `json:"messages"`
-}
-
-var db DatabaseSchema = DatabaseSchema{Users: []string{}, Messages: []Message{}}
-var mutex sync.Mutex
-const dbFilename = "database.json"
-
 func initDatabase() {
-	file, err := os.ReadFile(dbFilename)
-	if err == nil {
-		json.Unmarshal(file, &db)
+	var err error
+	// Abre (o crea) el archivo de la base de datos SQL
+	db, err = sql.Open("sqlite", "./clienteservidor.db")
+	if err != nil {
+		log.Fatal("Error abriendo la base de datos:", err)
 	}
-}
 
-func saveDatabase() {
-	data, _ := json.MarshalIndent(db, "", "  ")
-	os.WriteFile(dbFilename, data, 0644)
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
+	// Crear tabla de usuarios
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
+		name TEXT PRIMARY KEY
+	);`)
+	if err != nil {
+		log.Fatal(err)
 	}
-	return false
+
+	// Crear tabla de mensajes con llave foránea
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS messages (
+		id TEXT PRIMARY KEY,
+		sender TEXT,
+		text TEXT,
+		FOREIGN KEY (sender) REFERENCES users(name) ON DELETE CASCADE
+	);`)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -53,51 +54,55 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodOptions { return }
 
-	mutex.Lock()
-	defer mutex.Unlock()
-
 	switch r.Method {
-	case http.MethodGet: // LEER
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(db.Messages)
+	case http.MethodGet: // LEER (SELECT)
+		rows, err := db.Query("SELECT id, sender, text FROM messages")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
 
-	case http.MethodPost: // CREAR
+		var messages []Message
+		for rows.Next() {
+			var m Message
+			rows.Scan(&m.ID, &m.Sender, &m.Text)
+			messages = append(messages, m)
+		}
+		
+		// Si la tabla está vacía, retornar un arreglo vacío en vez de null
+		if messages == nil {
+			messages = []Message{}
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(messages)
+
+	case http.MethodPost: // CREAR (INSERT)
 		var msg Message
 		json.NewDecoder(r.Body).Decode(&msg)
-		// Generar ID único basado en milisegundos
 		msg.ID = fmt.Sprintf("%d", time.Now().UnixMilli())
+
+		// 1. Insertar el usuario (IGNORE evita el error si ya existe)
+		db.Exec("INSERT OR IGNORE INTO users (name) VALUES (?)", msg.Sender)
 		
-		db.Messages = append(db.Messages, msg)
-		if !contains(db.Users, msg.Sender) && msg.Sender != "" {
-			db.Users = append(db.Users, msg.Sender)
-		}
-		saveDatabase()
+		// 2. Insertar el mensaje
+		db.Exec("INSERT INTO messages (id, sender, text) VALUES (?, ?, ?)", msg.ID, msg.Sender, msg.Text)
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(msg)
 
-	case http.MethodPut: // ACTUALIZAR
+	case http.MethodPut: // ACTUALIZAR (UPDATE)
 		var msg Message
 		json.NewDecoder(r.Body).Decode(&msg)
-		for i, m := range db.Messages {
-			if m.ID == msg.ID {
-				db.Messages[i].Text = msg.Text
-				break
-			}
-		}
-		saveDatabase()
-		json.NewEncoder(w).Encode(map[string]string{"status": "Mensaje actualizado"})
+		
+		db.Exec("UPDATE messages SET text = ? WHERE id = ?", msg.Text, msg.ID)
+		json.NewEncoder(w).Encode(map[string]string{"status": "Actualizado"})
 
-	case http.MethodDelete: // ELIMINAR MENSAJE
+	case http.MethodDelete: // ELIMINAR (DELETE)
 		id := r.URL.Query().Get("id")
-		for i, m := range db.Messages {
-			if m.ID == id {
-				// Borrar elemento del slice
-				db.Messages = append(db.Messages[:i], db.Messages[i+1:]...)
-				break
-			}
-		}
-		saveDatabase()
-		json.NewEncoder(w).Encode(map[string]string{"status": "Mensaje eliminado"})
+		db.Exec("DELETE FROM messages WHERE id = ?", id)
+		json.NewEncoder(w).Encode(map[string]string{"status": "Eliminado"})
 	}
 }
 
@@ -107,34 +112,31 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	
 	if r.Method == http.MethodOptions { return }
 
-	mutex.Lock()
-	defer mutex.Unlock()
+	if r.Method == http.MethodGet { // SELECT USUARIOS
+		rows, _ := db.Query("SELECT name FROM users")
+		defer rows.Close()
 
-	if r.Method == http.MethodGet { // LEER USUARIOS
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(db.Users)
+		var users []string
+		for rows.Next() {
+			var name string
+			rows.Scan(&name)
+			users = append(users, name)
+		}
 		
-	} else if r.Method == http.MethodDelete { // ELIMINAR USUARIO (Y SUS MENSAJES)
+		if users == nil {
+			users = []string{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(users)
+		
+	} else if r.Method == http.MethodDelete { // DELETE USUARIO Y SUS MENSAJES
 		name := r.URL.Query().Get("name")
 		
-		// Borrar usuario de la lista
-		for i, u := range db.Users {
-			if u == name {
-				db.Users = append(db.Users[:i], db.Users[i+1:]...)
-				break
-			}
-		}
+		db.Exec("DELETE FROM messages WHERE sender = ?", name)
+		db.Exec("DELETE FROM users WHERE name = ?", name)
 		
-		// Borrar en cascada todos los mensajes que le pertenecen
-		var remainingMessages []Message
-		for _, m := range db.Messages {
-			if m.Sender != name {
-				remainingMessages = append(remainingMessages, m)
-			}
-		}
-		db.Messages = remainingMessages
-		saveDatabase()
-		json.NewEncoder(w).Encode(map[string]string{"status": "Usuario eliminado"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "Usuario y mensajes eliminados"})
 	}
 }
 
@@ -143,6 +145,6 @@ func main() {
 	http.HandleFunc("/api/clienteservidor/messages", handleMessages)
 	http.HandleFunc("/api/clienteservidor/users", handleUsers)
 	
-	log.Println("Servidor Go CRUD corriendo en puerto 8080...")
+	log.Println("Servidor Go corriendo con Base de Datos SQLite en puerto 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
