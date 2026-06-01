@@ -19,9 +19,11 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Inicializar modulo y descargar SQLite
+      - name: Inicializar modulo y crear entorno limpio
         working-directory: ./server
         run: |
+          rm -f go.mod go.sum
+          go mod init clienteservidor-api
           go get modernc.org/sqlite
           go mod tidy
 
