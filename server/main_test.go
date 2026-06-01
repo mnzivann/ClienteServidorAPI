@@ -1,18 +1,29 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-func TestContains(t *testing.T) {
-	// Simulamos un grupo de usuarios
-	usuarios := []string{"Jorge", "Hazziel", "Admin"}
+// Prueba para verificar que la estructura de Go interpreta bien el JSON de la API
+func TestMessageJSONMapping(t *testing.T) {
+	// Simulamos los datos que enviaría tu interfaz de Python
+	jsonData := []byte(`{"id":"12345", "sender":"Ivan", "text":"Hola desde el test"}`)
 
-	// Prueba 1: Debería encontrar a Hazziel
-	if !contains(usuarios, "Hazziel") {
-		t.Errorf("Error: Se esperaba encontrar a 'Hazziel' en la lista, pero la función devolvió falso")
+	var msg Message
+	err := json.Unmarshal(jsonData, &msg)
+
+	// Verificamos que no haya errores al traducir
+	if err != nil {
+		t.Fatalf("Error crítico: No se pudo parsear el JSON: %v", err)
 	}
 
-	// Prueba 2: NO debería encontrar a un usuario que no existe
-	if contains(usuarios, "Desconocido") {
-		t.Errorf("Error: La función devolvió verdadero para 'Desconocido', pero no está en la lista")
+	// Verificamos que los datos se hayan asignado correctamente
+	if msg.Sender != "Ivan" {
+		t.Errorf("Se esperaba 'Ivan', pero se obtuvo '%s'", msg.Sender)
+	}
+	
+	if msg.Text != "Hola desde el test" {
+		t.Errorf("Se esperaba 'Hola desde el test', pero se obtuvo '%s'", msg.Text)
 	}
 }
