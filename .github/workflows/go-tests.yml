@@ -1,6 +1,5 @@
 name: Pruebas Automatizadas Go
 
-# Esto le dice a GitHub que ejecute las pruebas cada vez que hagas un push
 on:
   push:
     branches: [ "main", "master" ]
@@ -9,23 +8,23 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest # El servidor de GitHub usará Linux
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Descargar el código
-      uses: actions/checkout@v3
+      - name: Descargar el codigo
+        uses: actions/checkout@v3
 
-    - name: Configurar entorno Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
+      - name: Configurar entorno Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
 
-    - name: Inicializar módulo y descargar SQLite
-      working-directory: ./server
-      run: |
-        go get modernc.org/sqlite
-        go mod tidy
+      - name: Inicializar modulo y descargar SQLite
+        working-directory: ./server
+        run: |
+          go get modernc.org/sqlite
+          go mod tidy
 
-    - name: Ejecutar Pruebas Unitarias
-      working-directory: ./server
-      run: go test -v ./...
+      - name: Ejecutar Pruebas Unitarias
+        working-directory: ./server
+        run: go test -v ./...
