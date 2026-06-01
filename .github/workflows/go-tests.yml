@@ -23,7 +23,6 @@ jobs:
     - name: Inicializar módulo y descargar SQLite
       working-directory: ./server
       run: |
-        go mod init clienteservidor-api
         go get modernc.org/sqlite
         go mod tidy
 
